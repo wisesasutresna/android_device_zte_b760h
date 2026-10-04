@@ -19,5 +19,11 @@
                 <data android:scheme="package"/>
             </intent-filter>
         </receiver>
+        <activity android:name=".TourStubActivity" android:theme="@android:style/Theme.NoDisplay" android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.tvtutorials.action.POST_SETUP_TOUR"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
