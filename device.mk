@@ -105,7 +105,8 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
     DocumentsUI \
     WebViewGoogle \
-    SetupWraith
+    SetupWraith \
+    B760HSetupCustomizer
 
 # Remove packages
 PRODUCT_PACKAGES += RemovePackages
