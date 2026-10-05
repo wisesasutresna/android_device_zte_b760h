@@ -3,9 +3,9 @@ name: Build LineageOS 14.1 for ZTE B760H (all patches)
 on:
   workflow_dispatch:        # you can also trigger manually from the Actions tab
   push:
-    branches: [ main ]      # rebuild on every push to main
+    branches: [ main, lineage-14.1 ]      # rebuild on every push to main
   pull_request:
-    branches: [ main ]
+    branches: [ main, lineage-14.1 ]
 
 jobs:
   build:
