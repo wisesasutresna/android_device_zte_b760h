@@ -1,0 +1,160 @@
+name: Build LineageOS 14.1 for ZTE B760H (all patches)
+
+on:
+  workflow_dispatch:        # you can also trigger manually from the Actions tab
+  push:
+    branches: [ main ]      # rebuild on every push to main
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest   # GitHub‑hosted Linux runner (2 vCPU, 7 GB RAM)
+    env:
+      JAVA_HOME: /usr/lib/jvm/java-8-openjdk-amd64
+      USE_CCACHE: 1
+      CCACHE_DIR: /tmp/ccache
+      CCACHE_MAXSIZE: 5G          # 5 GB cache size
+      MAKEFLAGS: "-j2"            # limit parallel jobs to save RAM
+
+    steps:
+      # -----------------------------------------------------------------
+      # 1. Checkout your fork (contains patches, vendor blobs, configs, etc.)
+      # -----------------------------------------------------------------
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------
+      # 2. Set up JDK 8
+      # -----------------------------------------------------------------
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      # -----------------------------------------------------------------
+      # 3. Install basic build tools
+      # -----------------------------------------------------------------
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git-core gnupg flex bison gperf build-essential \
+            zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
+            libncurses5 libncurses5-dev x11proto-core-dev libx11-dev \
+            lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip \
+            bc schedtool libssl-dev liblz4-tool pngcrush \
+            rsync ncurses-dev repo python3 python3-pip
+
+      # -----------------------------------------------------------------
+      # 4. Cache the LineageOS source (so repo sync is fast after the first run)
+      # -----------------------------------------------------------------
+      - name: Cache LineageOS source
+        uses: actions/cache@v4
+        with:
+          path: ~/android/lineage
+          key: lineage-source-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
+          restore-keys: |
+            lineage-source-${{ runner.os }}-
+
+      # -----------------------------------------------------------------
+      # 5. Initialise and sync the LineageOS 14.1 source (shallow clone)
+      # -----------------------------------------------------------------
+      - name: Init LineageOS repo
+        if: steps.cache-lineageos-source.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/android/lineage
+          cd ~/android/lineage
+          repo init -u https://github.com/LineageOS/android.git -b lineage-14.1 --depth=1
+
+      - name: Sync LineageOS source
+        run: |
+          cd ~/android/lineage
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle --optimized-fetch --prune
+
+      # -----------------------------------------------------------------
+      # 6. Copy the device‑tree (including all patches) into the LineageOS source
+      # -----------------------------------------------------------------
+      - name: Copy device tree
+        run: |
+          mkdir -p ~/android/lineage/device/zte/b760h
+          cp -r ${{ github.workspace }}/* ~/android/lineage/device/zte/b760h/
+          rm -rf ~/android/lineage/device/zte/b760h/.git   # remove copied .git
+
+      # -----------------------------------------------------------------
+      # 7. Apply **every** patch under patches/
+      # -----------------------------------------------------------------
+      - name: Apply all patches
+        run: |
+          cd ~/android/lineage
+          find device/zte/b760h/patches -name "*.patch" -type f -exec sh -c '
+            echo "Applying patch: $1"
+            patch -p1 < "$1"
+          ' _ {} \;
+          # If any patch fails, the step will stop and you will see the error in the log.
+          # You must then manually fix the conflict, commit the fix, and push again.
+
+      # -----------------------------------------------------------------
+      # 8. Cache ccache (so subsequent runs only recompile what changed)
+      # -----------------------------------------------------------------
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/ccache
+          key: ccache-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
+          restore-keys: |
+            ccache-${{ runner.os }}-
+
+      # -----------------------------------------------------------------
+      # 9. Prepare the build environment
+      # -----------------------------------------------------------------
+      - name: Setup build environment
+        run: |
+          cd ~/android/lineage
+          source build/envsetup.sh
+          lunch lineage_b760h-userdebug   # userdebug gives you root access via adb
+          echo "TARGET_PRODUCT=$TARGET_PRODUCT"
+          echo "TARGET_BUILD_VARIANT=$TARGET_BUILD_VARIANT"
+
+      # -----------------------------------------------------------------
+      # 10. Build the three images required for flashing
+      # -----------------------------------------------------------------
+      - name: Build boot image
+        run: |
+          cd ~/android/lineage
+          mka bootimage
+
+      - name: Build system image
+        run: |
+          cd ~/android/lineage
+          mka systemimage
+
+      - name: Build recovery image
+        run: |
+          cd ~/android/lineage
+          mka recoveryimage
+
+      # -----------------------------------------------------------------
+      # 11. Package the images into a single zip (to stay under the 500 MB artefact limit)
+      # -----------------------------------------------------------------
+      - name: Collect and zip images
+        run: |
+          mkdir -p ${{ github.workspace }}/artifacts
+          cp ~/android/lineage/out/target/product/b760h/boot.img ${{ github.workspace }}/artifacts/
+          cp ~/android/lineage/out/target/product/b760h/system.img ${{ github.workspace }}/artifacts/
+          cp ~/android/lineage/out/target/product/b760h/recovery.img ${{ github.workspace }}/artifacts/
+          cd ${{ github.workspace }}/artifacts
+          zip -r9 lineage-b760h-img.zip boot.img system.img recovery.img
+
+      # -----------------------------------------------------------------
+      # 12. Upload the zip as an artefact (downloadable from the Actions page)
+      # -----------------------------------------------------------------
+      - name: Upload artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lineage-b760h-img
+          path: ${{ github.workspace }}/artifacts/lineage-b760h-img.zip
+          retention-days: 7   # keep for a week; adjust if you wish
