@@ -248,6 +248,8 @@
     <string name="show_dev_already">No need, you are already a developer</string>
     <!-- Device Info screen. Used for a status item's value when the proper value is not known -->
     <string name="device_info_default">Unknown</string>
+    <!-- Device Info screen. Used for a status item's value when the proper value is not known -->
+    <string name="author_info_default">gamblingaddict</string>
     <!-- About screen,  setting option name  [CHAR LIMIT=40] -->
     <string name="selinux_status">SELinux status</string>
     <!-- These statuses are displayed when a device was built with SE Android supoprt.
@@ -1429,6 +1431,9 @@
 
     <!-- About phone screen, status item label  [CHAR LIMIT=60] -->
     <string name="security_patch">Android security patch level</string>
+
+    <!-- About phone screen, status item label  [CHAR LIMIT=60] -->
+    <string name="author_info">Device maintainer</string>
 
     <!-- App picker screen title -->
     <string name="choose_application">Choose application</string>
