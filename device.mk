@@ -64,6 +64,16 @@ PRODUCT_PACKAGES += \
     audio.primary.default \
     libaudio-resampler
 
+APOL_PATH := frameworks/av/services/audiopolicy/config
+APOL_DEST := system/etc
+
+PRODUCT_COPY_FILES += \
+    $(APOL_PATH)/a2dp_audio_policy_configuration.xml:$(APOL_DEST)/a2dp_audio_policy_configuration.xml \
+    $(APOL_PATH)/usb_audio_policy_configuration.xml:$(APOL_DEST)/usb_audio_policy_configuration.xml \
+    $(APOL_PATH)/r_submix_audio_policy_configuration.xml:$(APOL_DEST)/r_submix_audio_policy_configuration.xml \
+    $(APOL_PATH)/audio_policy_volumes.xml:$(APOL_DEST)/audio_policy_volumes.xml \
+    $(APOL_PATH)/default_volume_tables.xml:$(APOL_DEST)/default_volume_tables.xml
+
 # OMX
 PRODUCT_COPY_FILES += \
     $(call find-copy-subdir-files,*,$(DEVICE_PATH)/configs/media,system/etc) \
