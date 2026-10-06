@@ -81,20 +81,14 @@ jobs:
       - name: Apply all patches
         run: |
           cd ~/android/lineage
-          find device/zte/b760h/patches -name "*.patch" -type f | while read patchfile; do
-            rel_path=""
-            if [ -z "" ]; then
-              continue
+          find device/zte/b760h/patches -name "*.patch" -type f -exec sh -c \
+            
+            echo "Applying patch: $1"
+            if ! patch -p1 -t < "$1"; then
+              echo "Patch $1 failed to apply"
+              exit 1
             fi
-            target_dir="."
-            if [ -n "" ]; then
-              cd "" || { echo "Failed to change to "; exit 1; }
-            fi
-            echo "Applying patch:  in /media/digitalfuck/371bb643-128c-4953-9413-b6a97bbc9da42/B760H_OK_SOURCE/android_device_zte_b760h"
-            patch -p1 < ""
-            # Return to the root for the next iteration
-            cd ~/android/lineage
-          done
+           _ {} \;
 
       # -----------------------------------------------------------------
       # 8. Cache ccache (so subsequent runs only recompile what changed)
