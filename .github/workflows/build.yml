@@ -67,7 +67,7 @@ jobs:
         run: |
           mkdir -p ~/android/lineage
           cd ~/android/lineage
-          repo init -u https://github.com/LineageOS/android_manifest.git -b lineage-14.1 --depth=1
+          repo init -u https://github.com/LineageOS/android_manifest.git -b cm-14.1 --depth=1
       # -----------------------------------------------------------------
       - name: Copy device tree
         run: |
