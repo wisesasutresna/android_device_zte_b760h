@@ -2,6 +2,17 @@ name: Build LineageOS 14.1 for ZTE B760H (all patches)
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'Which image to build. `all` = boot + system + recovery'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - boot
+          - system
+          - recovery
   push:
     branches: [ main, lineage-14.1, fix/workflow-ci-build ]
   pull_request:
@@ -12,9 +23,16 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       USE_CCACHE: 1
-      CCACHE_DIR: /tmp/ccache
+      # Must live outside /tmp and inside the cached path below. It used to be
+      # /tmp/ccache, which is neither persisted nor even reachable by the
+      # cache step - and the ccache binary was never installed, so USE_CCACHE=1
+      # was a no-op and every run compiled from nothing.
+      CCACHE_DIR: /home/runner/.ccache
       CCACHE_MAXSIZE: 5G
       MAKEFLAGS: "-j2"
+      # Empty on push/pull_request, which means "all".
+      BUILD_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }}
+      SYSROOT_DIR: /home/runner/android/lineage
 
     steps:
       - name: Checkout fork
@@ -38,7 +56,8 @@ jobs:
             bc schedtool libssl-dev liblz4-tool pngcrush \
             rsync ncurses-dev repo python3 python3-pip \
             libncurses5 libtinfo5 \
-            python2
+            python2 \
+            ccache
 
           # LineageOS 14.1 host tooling is Python 2, including
           # build/tools/check_radio_versions.py:
@@ -51,17 +70,32 @@ jobs:
           sudo ln -sf /usr/bin/python2 /usr/local/bin/python
           echo "python is now: $(python --version 2>&1)"
 
-      - name: Cache LineageOS source
-        id: cache-lineageos-source
+      - name: Cache compiler objects (ccache)
         uses: actions/cache@v4
         with:
-          path: ~/android/lineage
-          key: lineage-source-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
-          restore-keys: |
-            lineage-source-${{ runner.os }}-
+          # ccache hashes the preprocessed source and the compiler flags itself,
+          # so a changed patch produces a different hash and misses on its own.
+          # The key therefore stays deliberately stable across workflow edits -
+          # tying it to hashFiles(build.yml) would throw the cache away on every
+          # edit to this file, which is exactly when reuse is wanted most.
+          # Bump the version by hand to force a cold cache.
+          path: /home/runner/.ccache
+          key: ccache-ubuntu2204-v1
+
+      - name: Reset ccache statistics
+        run: |
+          # Zero the counters so each run reports its own hits rather than a
+          # running total since the cache was first created.
+          ccache --zero-stats
+          echo "### ccache state before the build"
+          ccache --show-config | grep -E 'max_size|cache_dir' | sed 's/^/  /'
+          ccache --show-stats | sed 's/^/  /'
 
       - name: Init and sync LineageOS repo (android)
-        if: steps.cache-lineageos-source.outputs.cache-hit != 'true'
+        # Unconditional. This used to be skipped on a source-cache hit, but the
+        # source tree is 30 GB against GitHub's 10 GB cache limit, so it could
+        # never be cached and never was. See the ccache step for what is
+        # persisted now instead.
         run: |
           # Without pipefail this step reports tail's exit code, so a failed
           # repo sync is reported as a success and the next step dies with a
@@ -70,19 +104,34 @@ jobs:
           mkdir -p ~/android/lineage
           cd ~/android/lineage
           repo init -u https://github.com/LineageOS/android.git -b cm-14.1 --depth=1
-          repo sync -c -j4 --force-sync --force-broken 2>&1 | tail -20
+          repo sync -c -j4 --force-sync --force-broken 2>&1 | tee /tmp/repo-sync.log
 
-      - name: Report disk usage
+      - name: Report runner capacity
         run: |
-          echo "### Filesystem usage on the runner"
-          df -h /
+          echo "### CPU"
+          echo "  nproc:  $(nproc)"
+          echo "  MAKEFLAGS: $MAKEFLAGS"
           echo ""
-          echo "### Source tree size"
-          du -sh ~/android/lineage 2>/dev/null || echo "(not present - cache hit path)"
+          echo "### Memory"
+          free -h | sed 's/^/  /'
           echo ""
-          echo "A shallow cm-14.1 tree needs roughly 15-25 GB. If / is close to"
-          echo "full, repo sync or systemimage will fail even though the step"
-          echo "above reported success."
+          echo "### Filesystem"
+          df -h / | sed 's/^/  /'
+          echo ""
+          echo "### Source tree size (after sync)"
+          du -sh "$SYSROOT_DIR" 2>/dev/null | sed 's/^/  /' || echo "  (not present)"
+          echo ""
+          echo "### Build tree size"
+          du -sh "$SYSROOT_DIR/out" 2>/dev/null | sed 's/^/  /' || echo "  (no out/ yet)"
+          du -sh "$SYSROOT_DIR/out/host" 2>/dev/null | sed 's/^/    out/host /' || true
+          du -sh "$SYSROOT_DIR/out/target" 2>/dev/null | sed 's/^/    out/target /' || true
+          echo ""
+          echo "### ccache"
+          du -sh "$CCACHE_DIR" 2>/dev/null | sed 's/^/  /' || echo "  (empty)"
+          echo ""
+          echo "Recorded so out/ and ccache sizes stop being guesses. A GitHub-hosted"
+          echo "ubuntu-22.04 runner is 2 vCPU / 7 GB, so MAKEFLAGS=-j2 is deliberate;"
+          echo "raising it there would risk OOM without gaining cores."
 
       - name: Copy device tree
         run: |
@@ -211,38 +260,78 @@ jobs:
           echo "TARGET_BUILD_VARIANT=$TARGET_BUILD_VARIANT"
 
       - name: Build boot image
+        if: env.BUILD_TARGET == 'all' || env.BUILD_TARGET == 'boot'
         run: |
           set -o pipefail
-          cd ~/android/lineage
+          cd "$SYSROOT_DIR"
           source build/envsetup.sh
           lunch lineage_b760h-userdebug
-          mka bootimage 2>&1 | tail -100
+          mka bootimage 2>&1 | tee /tmp/bootimage-build.log
 
       - name: Build system image
+        if: env.BUILD_TARGET == 'all' || env.BUILD_TARGET == 'system'
         run: |
           set -o pipefail
-          cd ~/android/lineage
+          cd "$SYSROOT_DIR"
           source build/envsetup.sh
           lunch lineage_b760h-userdebug
-          mka systemimage 2>&1 | tail -100
+          mka systemimage 2>&1 | tee /tmp/systemimage-build.log
 
       - name: Build recovery image
+        # None of the 29 patches modifies recovery, so it is opt-in rather than
+        # part of `all`. Building it otherwise costs real time for an unchanged
+        # image.
+        if: env.BUILD_TARGET == 'all' || env.BUILD_TARGET == 'recovery'
         run: |
           set -o pipefail
-          cd ~/android/lineage
+          cd "$SYSROOT_DIR"
           source build/envsetup.sh
           lunch lineage_b760h-userdebug
-          mka recoveryimage 2>&1 | tail -100
+          mka recoveryimage 2>&1 | tee /tmp/recoveryimage-build.log
+
+      - name: Report ccache hit rate
+        if: always()
+        run: |
+          echo "### ccache after the build"
+          ccache --show-stats | sed 's/^/  /'
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-run${{ github.run_number }}
+          path: |
+            /tmp/*-build.log
+            /tmp/repo-sync.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Collect and zip images
         if: success()
         run: |
-          mkdir -p ${{ github.workspace }}/artifacts
-          cp ~/android/lineage/out/target/product/b760h/boot.img ${{ github.workspace }}/artifacts/
-          cp ~/android/lineage/out/target/product/b760h/system.img ${{ github.workspace }}/artifacts/
-          cp ~/android/lineage/out/target/product/b760h/recovery.img ${{ github.workspace }}/artifacts/
-          cd ${{ github.workspace }}/artifacts
-          zip -r9 lineage-b760h-img.zip boot.img system.img recovery.img
+          set -e
+          OUT="$SYSROOT_DIR/out/target/product/b760h"
+          ART="${{ github.workspace }}/artifacts"
+          mkdir -p "$ART"
+          # Collect whatever this run actually asked for rather than assuming
+          # all three images exist - `workflow_dispatch` can build just one.
+          FOUND=""
+          for img in boot system recovery; do
+            if [ -f "$OUT/$img.img" ]; then
+              cp "$OUT/$img.img" "$ART/"
+              FOUND="$FOUND $img.img"
+              echo "  collected $img.img ($(du -h "$OUT/$img.img" | cut -f1))"
+            else
+              echo "  not built: $img.img"
+            fi
+          done
+          if [ -z "$FOUND" ]; then
+            echo "::error::no images were produced"
+            exit 1
+          fi
+          cd "$ART"
+          # shellcheck disable=SC2086
+          zip -r9 lineage-b760h-img.zip $FOUND
 
       - name: Upload artefacts
         if: success()
