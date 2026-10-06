@@ -3,13 +3,13 @@ name: Build LineageOS 14.1 for ZTE B760H (all patches)
 on:
   workflow_dispatch:
   push:
-    branches: [ main, lineage-14.1 ]
+    branches: [ main, lineage-14.1, fix/workflow-ci-build ]
   pull_request:
     branches: [ main, lineage-14.1 ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       USE_CCACHE: 1
       CCACHE_DIR: /tmp/ccache
@@ -124,19 +124,23 @@ jobs:
       - name: Build boot image
         run: |
           cd ~/android/lineage
-          mka bootimage 2>&1 | tail -50
+          source build/envsetup.sh
+          mka bootimage 2>&1 | tail -100
 
       - name: Build system image
         run: |
           cd ~/android/lineage
-          mka systemimage 2>&1 | tail -50
+          source build/envsetup.sh
+          mka systemimage 2>&1 | tail -100
 
       - name: Build recovery image
         run: |
           cd ~/android/lineage
-          mka recoveryimage 2>&1 | tail -50
+          source build/envsetup.sh
+          mka recoveryimage 2>&1 | tail -100
 
       - name: Collect and zip images
+        if: success()
         run: |
           mkdir -p ${{ github.workspace }}/artifacts
           cp ~/android/lineage/out/target/product/b760h/boot.img ${{ github.workspace }}/artifacts/
@@ -146,6 +150,7 @@ jobs:
           zip -r9 lineage-b760h-img.zip boot.img system.img recovery.img
 
       - name: Upload artefacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: lineage-b760h-img
