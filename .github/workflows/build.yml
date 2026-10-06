@@ -62,7 +62,7 @@ jobs:
       # -----------------------------------------------------------------
       # 5. Initialise and sync the LineageOS 14.1 source (shallow clone)
       # -----------------------------------------------------------------
-      - name: Init LineageOS repo (manifest)
+      - name: Init LineageOS repo (android)
         if: steps.cache-lineageos-source.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/android/lineage
