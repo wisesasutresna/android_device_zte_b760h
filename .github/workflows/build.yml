@@ -50,16 +50,47 @@ jobs:
       - name: Init and sync LineageOS repo (android)
         if: steps.cache-lineageos-source.outputs.cache-hit != 'true'
         run: |
+          # Without pipefail this step reports tail's exit code, so a failed
+          # repo sync is reported as a success and the next step dies with a
+          # misleading "source tree is incomplete" error.
+          set -o pipefail
           mkdir -p ~/android/lineage
           cd ~/android/lineage
           repo init -u https://github.com/LineageOS/android.git -b cm-14.1 --depth=1
           repo sync -c -j4 --force-sync --force-broken 2>&1 | tail -20
+
+      - name: Report disk usage
+        run: |
+          echo "### Filesystem usage on the runner"
+          df -h /
+          echo ""
+          echo "### Source tree size"
+          du -sh ~/android/lineage 2>/dev/null || echo "(not present - cache hit path)"
+          echo ""
+          echo "A shallow cm-14.1 tree needs roughly 15-25 GB. If / is close to"
+          echo "full, repo sync or systemimage will fail even though the step"
+          echo "above reported success."
 
       - name: Copy device tree
         run: |
           mkdir -p ~/android/lineage/device/zte/b760h
           cp -r ${{ github.workspace }}/* ~/android/lineage/device/zte/b760h/
           rm -rf ~/android/lineage/device/zte/b760h/.git
+
+          # This repo bundles vendor/ inside the device tree, but LineageOS
+          # expects vendor/ at the root of the source tree:
+          #   device/zte/b760h/device.mk -> VENDOR_PATH := vendor/zte/b760h
+          #   device/zte/b760h/b760h-vendor.mk -> PRODUCT_COPY_FILES
+          #                                        vendor/zte/b760h/proprietary/...
+          # Without this the build looks for ~/android/lineage/vendor/zte/b760h
+          # and fails with: "vendor/zte/b760h/b760h-vendor.mk" does not exist.
+          #
+          # The nested copy is deliberately left in place: all-subdir-makefiles
+          # in device/zte/b760h/Android.mk has to find vendor/zte/b760h/Android.mk
+          # for the libdpframework prebuilt module.
+          mkdir -p ~/android/lineage/vendor/zte
+          cp -a ~/android/lineage/device/zte/b760h/vendor/zte/b760h \
+                ~/android/lineage/vendor/zte/
 
       - name: Apply all patches
         run: |
@@ -123,18 +154,21 @@ jobs:
 
       - name: Build boot image
         run: |
+          set -o pipefail
           cd ~/android/lineage
           source build/envsetup.sh
           mka bootimage 2>&1 | tail -100
 
       - name: Build system image
         run: |
+          set -o pipefail
           cd ~/android/lineage
           source build/envsetup.sh
           mka systemimage 2>&1 | tail -100
 
       - name: Build recovery image
         run: |
+          set -o pipefail
           cd ~/android/lineage
           source build/envsetup.sh
           mka recoveryimage 2>&1 | tail -100
