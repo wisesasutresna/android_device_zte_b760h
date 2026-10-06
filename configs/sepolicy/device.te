@@ -19,8 +19,8 @@
 
 #
 # GPU (Mali). Relabelled via file_contexts so app domains can be granted access
-# without widening the generic `device' type, which would be a real security
-# regression and would likely trip neverallow.
+# without widening the generic `device' type - see the /dev/sw_sync note below
+# for why that matters.
 #
 type mali_device, file_type;
 
@@ -34,9 +34,24 @@ allow priv_app      mali_device:chr_file rw_file_perms;
 allow system_app    mali_device:chr_file rw_file_perms;
 
 #
-# /dev/sw_sync is left on the generic `device' type on purpose: AOSP 7.1 may
-# already ship a label for it, and declaring a second type for the same path
-# risks a duplicate-label build error. surfaceflinger only needs ioctl here,
-# which is a much narrower grant than rw_file_perms.
+# /dev/sw_sync gets its own type for the same reason as /dev/mali: granting
+# access to the generic `device' type is what AOSP's neverallow blocks.
 #
-allow surfaceflinger device:chr_file { getattr open ioctl };
+# The first attempt at this was
+#
+#   allow surfaceflinger device:chr_file { getattr open ioctl };
+#
+# and the build rejected it outright:
+#
+#   libsepol.report_failure: neverallow on line 264 of system/sepolicy/domain.te
+#   (or line 6343 of policy.conf) violated by
+#   allow surfaceflinger device:chr_file { open };
+#   libsepol.check_assertions: 1 neverallow failures occurred
+#
+# so /dev/sw_sync must be relabelled rather than granted access to `device'.
+# A dedicated type costs nothing extra and keeps surfaceflinger off the
+# generic type entirely.
+#
+type sw_sync_b760h_device, file_type;
+
+allow surfaceflinger sw_sync_b760h_device:chr_file { getattr open ioctl };

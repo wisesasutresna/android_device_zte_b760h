@@ -1,8 +1,13 @@
 # ZTE B760H device node labels
 #
-# /dev/mali is created by configs/init/ueventd.mt8127.rc with mode 0666
-# system:graphics, but without an entry here it inherits the generic
-# `device' type and every process that touches the GPU is denied.
+# Both nodes below fell back to the generic `device' type, and granting access
+# to `device' is what AOSP's neverallow rejects. Each gets its own type instead.
 #
-# See device.te for the full denial breakdown.
+# /dev/mali is created by configs/init/ueventd.mt8127.rc with mode 0666
+# system:graphics, so DAC already lets every app open the GPU node - SELinux
+# alone was blocking them.
+#
+# See device.te for the full denial breakdown and for the neverallow that
+# forced this approach.
 /dev/mali                                    u:object_r:mali_device:s0
+/dev/sw_sync                                 u:object_r:sw_sync_b760h_device:s0
