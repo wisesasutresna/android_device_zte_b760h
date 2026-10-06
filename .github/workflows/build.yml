@@ -249,7 +249,16 @@ jobs:
             LEFT=$((LEFT + $(find "$d" -type f \( -name '*.orig' -o -name '*.rej' \) -print | wc -l)))
           done < <(sort -u /tmp/patched-dirs.txt)
           echo "  $LEFT"
-          [ "$LEFT" -ne 0 ] && exit 1
+          # Written as an if, not as `[ "$LEFT" -ne 0 ] && exit 1`. That form
+          # was the last command in this step, so when the test was false the
+          # script exited with status 1 and the step was reported as failed
+          # even though the tree was clean. Runs #24 and #25 both failed here
+          # with "found: 0 / remaining: 0".
+          if [ "$LEFT" -ne 0 ]; then
+            echo "::error::patch artefacts survived cleanup"
+            exit 1
+          fi
+          echo "  tree is clean"
 
       - name: Setup build environment
         run: |
