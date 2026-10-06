@@ -62,20 +62,12 @@ jobs:
       # -----------------------------------------------------------------
       # 5. Initialise and sync the LineageOS 14.1 source (shallow clone)
       # -----------------------------------------------------------------
-      - name: Init LineageOS repo
+      - name: Init LineageOS repo (manifest)
         if: steps.cache-lineageos-source.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/android/lineage
           cd ~/android/lineage
-          repo init -u https://github.com/LineageOS/android.git -b lineage-14.1 --depth=1
-
-      - name: Sync LineageOS source
-        run: |
-          cd ~/android/lineage
-          repo sync -c -j$(nproc) --no-tags --no-clone-bundle --optimized-fetch --prune
-
-      # -----------------------------------------------------------------
-      # 6. Copy the device‑tree (including all patches) into the LineageOS source
+          repo init -u https://github.com/LineageOS/android_manifest.git -b lineage-14.1 --depth=1
       # -----------------------------------------------------------------
       - name: Copy device tree
         run: |
