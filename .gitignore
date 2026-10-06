@@ -1,0 +1,8 @@
+# Build artefacts pulled up by the CI workflow
+/logs.txt
+/logs_latest.zip
+/logs*.zip
+
+# Individual images, when unpacked in the tree root
+/*.img
+/*.zip
