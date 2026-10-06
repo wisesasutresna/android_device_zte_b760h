@@ -33,6 +33,22 @@ jobs:
       # Empty on push/pull_request, which means "all".
       BUILD_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.target || 'all' }}
       SYSROOT_DIR: /home/runner/android/lineage
+      # Android 7.1 uses Jack as the Java compiler, and Jack talks to its own
+      # server over SSL. TLSv1/TLSv1.1 have been disabled by default since
+      # JDK 8u291 and the runner ships 8.0.504, so the handshake fails:
+      #   Jack server failed to (re)start, try 'jack-diagnose'
+      #   SSL error when connecting to the Jack server
+      # and the build dies with exit code 47.
+      #
+      # Two independent levers, because either alone may not be enough:
+      #   - java.security.properties  lifts jdk.tls.disabledAlgorithms, which is
+      #     a security-manager property rather than a plain -D, so it can only
+      #     be reached through an override file.
+      #   - jdk.tls.client.protocols pins the client to TLSv1.2, which has never
+      #     been disabled, in case the override is not honoured.
+      # Nothing else in this build uses Java TLS - git does its own - so this is
+      # contained to Jack.
+      _JAVA_OPTIONS: "-Djava.security.properties=/home/runner/tls-override.security -Djdk.tls.client.protocols=TLSv1.2 -Dhttps.protocols=TLSv1.2"
 
     steps:
       - name: Checkout fork
@@ -45,6 +61,18 @@ jobs:
         with:
           distribution: temurin
           java-version: '8'
+
+      - name: Allow legacy TLS for the Jack server
+        run: |
+          printf 'jdk.tls.disabledAlgorithms=\n' > /home/runner/tls-override.security
+          echo "### override file"
+          cat /home/runner/tls-override.security | sed 's/^/  /'
+          echo ""
+          echo "### java in use"
+          java -version 2>&1 | sed 's/^/  /'
+          echo ""
+          echo "### does this JDK actually ignore TLSv1 now?"
+          java -Xshowsettings:properties -version 2>&1 | grep -i tls | sed 's/^/  /' || true
 
       - name: Install packages
         run: |
@@ -298,11 +326,60 @@ jobs:
           lunch lineage_b760h-userdebug
           mka recoveryimage 2>&1 | tee /tmp/recoveryimage-build.log
 
+      - name: Collect Jack diagnostics
+        if: always()
+        run: |
+          set +e
+          OUT=/tmp/jack-diagnostics.txt
+          {
+            echo "=== Jack state before the build ==="
+            echo "--- jack-admin path ---"
+            ls -l "$SYSROOT_DIR/prebuilts/sdk/tools/jack-admin" 2>&1
+            echo ""
+            echo "--- jack jars present? ---"
+            ls -1 "$SYSROOT_DIR/prebuilts/sdk/tools/" 2>&1 | grep -i jack | head -30
+            echo ""
+            echo "--- jack-diagnose ---"
+            "$SYSROOT_DIR/prebuilts/sdk/tools/jack-diagnose" 2>&1 | head -60
+            echo ""
+            echo "--- ~/.jack-server contents ---"
+            ls -la "$HOME/.jack-server" 2>&1
+            echo ""
+            echo "--- ~/.jack-settings ---"
+            cat "$HOME/.jack-settings" 2>&1
+          } > "$OUT" 2>&1
+          cp "$OUT" /tmp/jack-diagnostics-pre.txt 2>/dev/null
+          sed 's/^/  /' "$OUT"
+          exit 0
+
       - name: Report ccache hit rate
         if: always()
         run: |
           echo "### ccache after the build"
           ccache --show-stats | sed 's/^/  /'
+
+      - name: Collect Jack logs
+        if: failure()
+        run: |
+          set +e
+          # The Jack server writes its own log, and the build message says to
+          # look there. Without this the actual reason for exit 47 is never in
+          # the job log, only "SSL error when connecting to the Jack server".
+          mkdir -p /tmp/jack-logs
+          for f in "$HOME/.jack-server"/*.log "$HOME"/.jack*.log; do
+            [ -f "$f" ] && cp "$f" /tmp/jack-logs/ 2>/dev/null
+          done
+          {
+            echo "### Jack server logs"
+            ls -la /tmp/jack-logs
+            for f in /tmp/jack-logs/*; do
+              [ -f "$f" ] || continue
+              echo ""
+              echo "--- $f (last 80 lines) ---"
+              tail -80 "$f"
+            done
+          } > /tmp/jack-logs.txt 2>&1
+          sed 's/^/  /' /tmp/jack-logs.txt | head -120
 
       - name: Upload build logs
         if: failure()
@@ -312,6 +389,7 @@ jobs:
           path: |
             /tmp/*-build.log
             /tmp/repo-sync.log
+            /tmp/jack-logs.txt
           if-no-files-found: warn
           retention-days: 7
 
