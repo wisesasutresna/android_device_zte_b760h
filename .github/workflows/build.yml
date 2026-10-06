@@ -130,13 +130,14 @@ jobs:
             fi
 
             echo "📋 Applying patch [$PATCH_COUNT]: $rel_path in $PATCH_DIR"
-            if ! patch -p1 -t -d "$PATCH_DIR" < "$patchfile"; then
+            echo "$PATCH_DIR" >> /tmp/patched-dirs.txt
+            if ! patch -p1 --no-backup-if-mismatch -r - -d "$PATCH_DIR" < "$patchfile"; then
               echo "❌ FAILED: Patch $rel_path failed to apply in $PATCH_DIR"
               echo "   Attempting to apply with -p0..."
-              if ! patch -p0 -t -d "$PATCH_DIR" < "$patchfile"; then
+              if ! patch -p0 --no-backup-if-mismatch -r - -d "$PATCH_DIR" < "$patchfile"; then
                 PATCH_FAILED=$((PATCH_FAILED + 1))
-                echo "   Still failed with -p0. Skipping."
-                PATCH_SKIPPED=$((PATCH_SKIPPED + 1))
+                echo "   Still failed with -p0. Stopping."
+                break
               else
                 echo "✓ Applied with -p0"
               fi
@@ -156,6 +157,50 @@ jobs:
           if [ $PATCH_FAILED -gt 0 ]; then
             exit 1
           fi
+
+      - name: Clean patch artefacts
+        run: |
+          # GNU patch writes <file>.orig next to every file it modifies with an
+          # offset or with fuzz. --no-backup-if-mismatch does NOT suppress that;
+          # it only suppresses backups on outright mismatch. Verified locally:
+          #   $ patch -p1 -t < t.patch
+          #     Hunk #1 succeeded at 1 with fuzz 1.
+          #     artefak: ./f.txt.orig
+          #
+          # Those leftovers are fatal, not cosmetic. frameworks/base/0006 lands
+          # its strings.xml hunk with a 63-line offset, leaving
+          # core/res/res/values/strings.xml.orig next to strings.xml. aapt2 then
+          # compiles both, and the build dies with dozens of:
+          #   error: Resource entry work_mode_off_title is already defined.
+          #
+          # Scoped to the directories that were patched, so nothing else in the
+          # tree is touched.
+          cd ~/android/lineage
+          echo "### Patched directories"
+          sort -u /tmp/patched-dirs.txt | sed 's/^/  /'
+          echo ""
+          echo "### .orig / .rej files left behind"
+          : > /tmp/patch-artifacts.txt
+          while read -r d; do
+            [ -d "$d" ] || continue
+            find "$d" -type f \( -name '*.orig' -o -name '*.rej' \) -print >> /tmp/patch-artifacts.txt
+          done < <(sort -u /tmp/patched-dirs.txt)
+          TOTAL=$(wc -l < /tmp/patch-artifacts.txt)
+          echo "  found: $TOTAL"
+          if [ "$TOTAL" -gt 0 ]; then
+            sort /tmp/patch-artifacts.txt | head -40 | sed 's/^/    /'
+            [ "$TOTAL" -gt 40 ] && echo "    ... and $((TOTAL - 40)) more"
+            xargs -r rm -f < /tmp/patch-artifacts.txt
+          fi
+          echo ""
+          echo "### Remaining after cleanup"
+          LEFT=0
+          while read -r d; do
+            [ -d "$d" ] || continue
+            LEFT=$((LEFT + $(find "$d" -type f \( -name '*.orig' -o -name '*.rej' \) -print | wc -l)))
+          done < <(sort -u /tmp/patched-dirs.txt)
+          echo "  $LEFT"
+          [ "$LEFT" -ne 0 ] && exit 1
 
       - name: Setup build environment
         run: |
