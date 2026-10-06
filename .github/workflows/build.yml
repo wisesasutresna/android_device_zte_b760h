@@ -288,6 +288,65 @@ jobs:
           fi
           echo "  tree is clean"
 
+      - name: Pre-build resource java that Jack waits on
+        run: |
+          cd "$SYSROOT_DIR"
+          source build/envsetup.sh
+          lunch lineage_b760h-userdebug
+          set -o pipefail
+
+          # org.cyanogenmod.platform.internal is a java_library whose source
+          # references org.cyanogenmod.platform-res. Jack is handed the
+          # generated R.java / Manifest.java as explicit file arguments, so it
+          # dies if they are not there yet:
+          #
+          #   4 errors during configuration. Try --help-properties for help.
+          #     Property 'jack.source' (in Options): element #1: file
+          #     '.../org.cyanogenmod.platform-res_intermediates/src/.../Manifest.java'
+          #     does not exist
+          #
+          # This is not a race. Run #28 compiled 12221 edges over 40 minutes
+          # and the files still were not there, and the two retries then failed
+          # within seconds. The res module is never scheduled, so the files are
+          # never produced at any point in the build.
+          #
+          # Build it explicitly first. mka <module> works for java modules
+          # because the build emits a phony target per module name.
+          echo "### Building org.cyanogenmod.platform-res explicitly"
+          mka org.cyanogenmod.platform-res 2>&1 | tee /tmp/preres-build.log | tail -25
+
+          echo ""
+          echo "### Where did the generated java land?"
+          FOUND=0
+          for p in \
+            out/target/common/obj/APPS/org.cyanogenmod.platform-res_intermediates/src/cyanogenmod/platform/R.java \
+            out/target/common/obj/APPS/org.cyanogenmod.platform-res_intermediates/src/cyanogenmod/platform/Manifest.java \
+            out/target/common/obj/JAVA_LIBRARIES/org.cyanogenmod.platform-res_intermediates/src/cyanogenmod/platform/R.java \
+            out/target/common/obj/JAVA_LIBRARIES/org.cyanogenmod.platform-res_intermediates/src/cyanogenmod/platform/Manifest.java
+          do
+            if [ -f "$p" ]; then
+              echo "  FOUND  $p"
+              FOUND=1
+            else
+              echo "  absent $p"
+            fi
+          done
+
+          echo ""
+          echo "### ninja targets that mention the module"
+          ninja -C out -t targets all 2>/dev/null | grep -i 'org.cyanogenmod.platform-res' | head -12 || true
+          echo "  (kalau kosong, modulenya memang tidak ada di graf ninja)"
+
+          echo ""
+          echo "### did the .apk get produced?"
+          find out -name 'org.cyanogenmod.platform-res*.apk' 2>/dev/null | head -5 || true
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo "::warning::platform-res generated java still absent after an explicit build - the next step will fail and the log above explains why"
+          else
+            echo "platform-res generated java is present, continuing"
+          fi
+
       - name: Setup build environment
         run: |
           cd ~/android/lineage
@@ -313,20 +372,15 @@ jobs:
           source build/envsetup.sh
           lunch lineage_b760h-userdebug
 
-          # cm-14.1 has no ninja edge ordering the R.java / Manifest.java that
-          # a -res library generates ahead of the Jack compile that consumes
-          # them, so a parallel build can lose that race:
+          # cm-14.1 never schedules org.cyanogenmod.platform-res, so the R.java
+          # that the Jack compile of org.cyanogenmod.platform.internal needs is
+          # not produced at any point. "Pre-build resource java that Jack waits
+          # on" builds it explicitly ahead of time.
           #
-          #   FAILED: [code=41] .../org.cyanogenmod.platform.internal_intermediates/classes.jack
-          #   4 errors during configuration. Try --help-properties for help.
-          #     Property 'jack.source' (in Options): element #1: file
-          #     '.../org.cyanogenmod.platform-res_intermediates/src/.../Manifest.java' does not exist
-          #
-          # Ninja reports only the failed edges on a rerun, and by then the
-          # resource java exists, so a bounded retry converges. This retries
-          # ONLY on that exact signature - any other build failure fails
-          # immediately with the full log, so real errors are never retried
-          # away.
+          # A bounded rerun is still kept as a cheap safety net: ninja replays
+          # only failed edges, so a second pass costs seconds when there is
+          # genuinely nothing left to do. It is not the fix for this failure -
+          # retries were tried in run #28 and did not help.
           for attempt in 1 2 3; do
             echo "### systemimage attempt $attempt of 3"
             if mka systemimage 2>&1 | tee /tmp/systemimage-build.log; then
@@ -337,10 +391,11 @@ jobs:
               echo "::error::systemimage failed for a reason unrelated to the Jack race - not retrying"
               exit 1
             fi
-            echo "### Jack R.java race on attempt $attempt, retrying"
+            echo "### platform-res java still missing on attempt $attempt, retrying"
             sleep 10
           done
           echo "::error::systemimage still failing after 3 attempts"
+          echo "--- see the 'Pre-build resource java' step for where the file actually landed ---"
           exit 1
 
       - name: Build recovery image
