@@ -1,0 +1,8 @@
+# ZTE B760H device node labels
+#
+# /dev/mali is created by configs/init/ueventd.mt8127.rc with mode 0666
+# system:graphics, but without an entry here it inherits the generic
+# `device' type and every process that touches the GPU is denied.
+#
+# See device.te for the full denial breakdown.
+/dev/mali                                    u:object_r:mali_device:s0

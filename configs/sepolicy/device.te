@@ -1,0 +1,42 @@
+# ZTE B760H device-specific SELinux policy
+#
+# BOARD_SEPOLICY_DIRS in BoardConfig.mk points at this directory, but it did
+# not exist until now - every rule below was therefore never compiled and
+# every device node fell back to the generic `device' type.
+#
+# On a running build this produced 202 avc denials against chr_file, all with
+# tcontext=u:object_r:device:s0:
+#
+#   /dev/mali      150   { ioctl } 73  { read write } 68  { open } 28  { getattr } 28
+#                         denied to untrusted_app (57), priv_app (46),
+#                         system_app (31), surfaceflinger (30),
+#                         platform_app (25), system_server (8)
+#
+#   /dev/sw_sync    52   { ioctl } from surfaceflinger (HWC_Ovl, HWC_Blit)
+#
+# ueventd grants /dev/mali mode 0666 system:graphics, so DAC already permits
+# every app to open the GPU node - it is SELinux alone that blocks them.
+
+#
+# GPU (Mali). Relabelled via file_contexts so app domains can be granted access
+# without widening the generic `device' type, which would be a real security
+# regression and would likely trip neverallow.
+#
+type mali_device, file_type;
+
+allow surfaceflinger mali_device:chr_file rw_file_perms;
+allow system_server  mali_device:chr_file rw_file_perms;
+
+# These mirror how AOSP grants apps access to gpu_device (/dev/kgsl-3d0).
+allow untrusted_app mali_device:chr_file rw_file_perms;
+allow platform_app  mali_device:chr_file rw_file_perms;
+allow priv_app      mali_device:chr_file rw_file_perms;
+allow system_app    mali_device:chr_file rw_file_perms;
+
+#
+# /dev/sw_sync is left on the generic `device' type on purpose: AOSP 7.1 may
+# already ship a label for it, and declaring a second type for the same path
+# risks a duplicate-label build error. surfaceflinger only needs ioctl here,
+# which is a much narrower grant than rw_file_perms.
+#
+allow surfaceflinger device:chr_file { getattr open ioctl };
