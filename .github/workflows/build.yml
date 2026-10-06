@@ -37,7 +37,19 @@ jobs:
             lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip \
             bc schedtool libssl-dev liblz4-tool pngcrush \
             rsync ncurses-dev repo python3 python3-pip \
-            libncurses5 libtinfo5
+            libncurses5 libtinfo5 \
+            python2
+
+          # LineageOS 14.1 host tooling is Python 2, including
+          # build/tools/check_radio_versions.py:
+          #   File "build/tools/check_radio_versions.py", line 56
+          #     print "*** Error opening \"%s.sha1\"; can't verify %s" % (fn, key)
+          #   SyntaxError: Missing parentheses in call to 'print'
+          # Ubuntu 22.04 points `python` at Python 3, so point it back at 2.
+          # Scripts that genuinely need 3 invoke python3 explicitly and are
+          # unaffected by this.
+          sudo ln -sf /usr/bin/python2 /usr/local/bin/python
+          echo "python is now: $(python --version 2>&1)"
 
       - name: Cache LineageOS source
         id: cache-lineageos-source
