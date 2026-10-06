@@ -312,7 +312,36 @@ jobs:
           cd "$SYSROOT_DIR"
           source build/envsetup.sh
           lunch lineage_b760h-userdebug
-          mka systemimage 2>&1 | tee /tmp/systemimage-build.log
+
+          # cm-14.1 has no ninja edge ordering the R.java / Manifest.java that
+          # a -res library generates ahead of the Jack compile that consumes
+          # them, so a parallel build can lose that race:
+          #
+          #   FAILED: [code=41] .../org.cyanogenmod.platform.internal_intermediates/classes.jack
+          #   4 errors during configuration. Try --help-properties for help.
+          #     Property 'jack.source' (in Options): element #1: file
+          #     '.../org.cyanogenmod.platform-res_intermediates/src/.../Manifest.java' does not exist
+          #
+          # Ninja reports only the failed edges on a rerun, and by then the
+          # resource java exists, so a bounded retry converges. This retries
+          # ONLY on that exact signature - any other build failure fails
+          # immediately with the full log, so real errors are never retried
+          # away.
+          for attempt in 1 2 3; do
+            echo "### systemimage attempt $attempt of 3"
+            if mka systemimage 2>&1 | tee /tmp/systemimage-build.log; then
+              echo "### systemimage built on attempt $attempt"
+              exit 0
+            fi
+            if ! grep -q "Property 'jack.source' (in Options)" /tmp/systemimage-build.log; then
+              echo "::error::systemimage failed for a reason unrelated to the Jack race - not retrying"
+              exit 1
+            fi
+            echo "### Jack R.java race on attempt $attempt, retrying"
+            sleep 10
+          done
+          echo "::error::systemimage still failing after 3 attempts"
+          exit 1
 
       - name: Build recovery image
         # None of the 29 patches modifies recovery, so it is opt-in rather than
