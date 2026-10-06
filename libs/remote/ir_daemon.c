@@ -61,6 +61,7 @@ struct scancode_map {
 /* Probably complete, but the keycode selection is a bit questionable.
  * Best to check the stock firmware later on. */
 static const struct scancode_map kScancodeMap[] = {
+    // Cheapo remote:
     { 0x00, KEY_0, "0" },
     { 0x01, KEY_1, "1" },
     { 0x02, KEY_2, "2" },
@@ -100,7 +101,40 @@ static const struct scancode_map kScancodeMap[] = {
     { 0x4f, KEY_F2, "F2" },
     { 0x50, KEY_F3, "F3" },
     { 0x51, KEY_F4, "F4" },
-    { 0x56, KEY_HOMEPAGE, "home" }
+    { 0x56, KEY_HOMEPAGE, "home" },
+
+    // ZTE B866F remote:
+    { 0xdc, KEY_POWER, "power" },
+    { 0x80, KEY_VOLUMEUP, "volume up" },
+    { 0x9c, KEY_MUTE, "mute" },
+    { 0xea, KEY_AUDIO, "L/R" },
+    { 0x81, KEY_VOLUMEDOWN, "volume down" },
+    { 0x95, KEY_PLAYPAUSE, "play/pause" },
+    { 0xeb, KEY_TV, "TVOD" },
+    { 0xe3, KEY_F7, "netflix" },
+    { 0xe9, KEY_APPSELECT, "apps" },
+    { 0xfe, 582, "assistant" },
+    { 0xca, KEY_UP, "up" },
+    { 0x99, KEY_LEFT, "left" },
+    { 0xc1, KEY_RIGHT, "right" },
+    { 0xd2, KEY_DOWN, "down" },
+    { 0xce, KEY_SELECT, "center" }, // Android treats this key as the center button in a d-pad.
+    { 0xc5, KEY_BACK, "back" },
+    { 0x82, KEY_HOMEPAGE, "home" },
+    { 0x88, KEY_F8, "dot-bigdot-dot" },
+    { 0x92, KEY_1, "1" },
+    { 0x93, KEY_2, "2" },
+    { 0xcc, KEY_3, "3" },
+    { 0x8e, KEY_4, "4" },
+    { 0x8f, KEY_5, "5" },
+    { 0xc8, KEY_6, "6" },
+    { 0x8a, KEY_7, "7" },
+    { 0x8b, KEY_8, "8" },
+    { 0xc4, KEY_9, "9" },
+    { 0xde, KEY_DOT, "dot" },
+    { 0x87, KEY_0, "0" },
+    { 0xdf, KEY_BACKSPACE, "backspace" },
+
 };
 #define kScancodeMapLen (sizeof(kScancodeMap) / sizeof(kScancodeMap[0]))
 
