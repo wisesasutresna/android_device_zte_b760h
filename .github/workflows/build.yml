@@ -1,43 +1,33 @@
 name: Build LineageOS 14.1 for ZTE B760H (all patches)
 
 on:
-  workflow_dispatch:        # you can also trigger manually from the Actions tab
+  workflow_dispatch:
   push:
-    branches: [ main, lineage-14.1 ]      # rebuild on every push to main
+    branches: [ main, lineage-14.1 ]
   pull_request:
     branches: [ main, lineage-14.1 ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest   # GitHub‑hosted Linux runner (2 vCPU, 7 GB RAM)
+    runs-on: ubuntu-latest
     env:
-      JAVA_HOME: /usr/lib/jvm/java-8-openjdk-amd64
       USE_CCACHE: 1
       CCACHE_DIR: /tmp/ccache
-      CCACHE_MAXSIZE: 5G          # 5 GB cache size
-      MAKEFLAGS: "-j2"            # limit parallel jobs to save RAM
+      CCACHE_MAXSIZE: 5G
+      MAKEFLAGS: "-j2"
 
     steps:
-      # -----------------------------------------------------------------
-      # 1. Checkout your fork (contains patches, vendor blobs, configs, etc.)
-      # -----------------------------------------------------------------
       - name: Checkout fork
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # -----------------------------------------------------------------
-      # 2. Set up JDK 8
-      # -----------------------------------------------------------------
       - name: Set up JDK 8
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '8'
 
-      # -----------------------------------------------------------------
-      # 3. Install basic build tools
-      # -----------------------------------------------------------------
       - name: Install packages
         run: |
           sudo apt-get update
@@ -48,10 +38,8 @@ jobs:
             bc schedtool libssl-dev liblz4-tool pngcrush \
             rsync ncurses-dev repo python3 python3-pip
 
-      # -----------------------------------------------------------------
-      # 4. Cache the LineageOS source (so repo sync is fast after the first run)
-      # -----------------------------------------------------------------
       - name: Cache LineageOS source
+        id: cache-lineageos-source
         uses: actions/cache@v4
         with:
           path: ~/android/lineage
@@ -59,77 +47,95 @@ jobs:
           restore-keys: |
             lineage-source-${{ runner.os }}-
 
-      # -----------------------------------------------------------------
-      # 5. Initialise and sync the LineageOS 14.1 source (shallow clone)
-      # -----------------------------------------------------------------
-      - name: Init LineageOS repo (android)
+      - name: Init and sync LineageOS repo (android)
         if: steps.cache-lineageos-source.outputs.cache-hit != 'true'
         run: |
           mkdir -p ~/android/lineage
           cd ~/android/lineage
           repo init -u https://github.com/LineageOS/android.git -b cm-14.1 --depth=1
-      # -----------------------------------------------------------------
+          repo sync -c -j4 --force-sync --force-broken 2>&1 | tail -20
+
       - name: Copy device tree
         run: |
           mkdir -p ~/android/lineage/device/zte/b760h
           cp -r ${{ github.workspace }}/* ~/android/lineage/device/zte/b760h/
-          rm -rf ~/android/lineage/device/zte/b760h/.git   # remove copied .git
+          rm -rf ~/android/lineage/device/zte/b760h/.git
 
-      # -----------------------------------------------------------------
-      # 7. Apply **every** patch under patches/
-      # -----------------------------------------------------------------
       - name: Apply all patches
         run: |
           cd ~/android/lineage
+          PATCH_COUNT=0
+          PATCH_FAILED=0
+          PATCH_SKIPPED=0
+
           for patchfile in $(find device/zte/b760h/patches -name "*.patch" -type f | sort); do
+            PATCH_COUNT=$((PATCH_COUNT + 1))
             rel_path="${patchfile#device/zte/b760h/patches/}"
-            if [ -z "$rel_path" ]; then
+            target_dir="$(dirname "$rel_path")"
+
+            if [ -n "$target_dir" ] && [ ! -d "$target_dir" ]; then
+              echo "⚠️  SKIPPED: Target directory does not exist: $target_dir (patch: $rel_path)"
+              PATCH_SKIPPED=$((PATCH_SKIPPED + 1))
               continue
             fi
-            target_dir="$(dirname "$rel_path")"
+
             if [ -n "$target_dir" ]; then
-              cd "$target_dir" || { echo "Failed to change to $target_dir"; exit 1; }
+              PATCH_DIR="$target_dir"
+            else
+              PATCH_DIR="."
             fi
-            echo "Applying patch: $patchfile in $(pwd)"
-            if ! patch -p1 -t < "$patchfile"; then
-              echo "Patch $patchfile failed to apply"
-              exit 1
+
+            echo "📋 Applying patch [$PATCH_COUNT]: $rel_path in $PATCH_DIR"
+            if ! patch -p1 -t -d "$PATCH_DIR" < "$patchfile"; then
+              echo "❌ FAILED: Patch $rel_path failed to apply in $PATCH_DIR"
+              echo "   Attempting to apply with -p0..."
+              if ! patch -p0 -t -d "$PATCH_DIR" < "$patchfile"; then
+                PATCH_FAILED=$((PATCH_FAILED + 1))
+                echo "   Still failed with -p0. Skipping."
+                PATCH_SKIPPED=$((PATCH_SKIPPED + 1))
+              else
+                echo "✓ Applied with -p0"
+              fi
+            else
+              echo "✓ Applied successfully"
             fi
-            cd ~/android/lineage
           done
 
-      # -----------------------------------------------------------------
-      # 9. Prepare the build environment
-      # -----------------------------------------------------------------
+          echo ""
+          echo "========================================="
+          echo "Patch Summary:"
+          echo "  Total:   $PATCH_COUNT"
+          echo "  Failed:  $PATCH_FAILED"
+          echo "  Skipped: $PATCH_SKIPPED"
+          echo "========================================="
+
+          if [ $PATCH_FAILED -gt 0 ]; then
+            exit 1
+          fi
+
       - name: Setup build environment
         run: |
           cd ~/android/lineage
           source build/envsetup.sh
-          lunch lineage_b760h-userdebug   # userdebug gives you root access via adb
+          lunch lineage_b760h-userdebug
           echo "TARGET_PRODUCT=$TARGET_PRODUCT"
           echo "TARGET_BUILD_VARIANT=$TARGET_BUILD_VARIANT"
 
-      # -----------------------------------------------------------------
-      # 10. Build the three images required for flashing
-      # -----------------------------------------------------------------
       - name: Build boot image
         run: |
           cd ~/android/lineage
-          mka bootimage
+          mka bootimage 2>&1 | tail -50
 
       - name: Build system image
         run: |
           cd ~/android/lineage
-          mka systemimage
+          mka systemimage 2>&1 | tail -50
 
       - name: Build recovery image
         run: |
           cd ~/android/lineage
-          mka recoveryimage
+          mka recoveryimage 2>&1 | tail -50
 
-      # -----------------------------------------------------------------
-      # 11. Package the images into a single zip (to stay under the 500 MB artefact limit)
-      # -----------------------------------------------------------------
       - name: Collect and zip images
         run: |
           mkdir -p ${{ github.workspace }}/artifacts
@@ -139,12 +145,9 @@ jobs:
           cd ${{ github.workspace }}/artifacts
           zip -r9 lineage-b760h-img.zip boot.img system.img recovery.img
 
-      # -----------------------------------------------------------------
-      # 12. Upload the zip as an artefact (downloadable from the Actions page)
-      # -----------------------------------------------------------------
       - name: Upload artefacts
         uses: actions/upload-artifact@v4
         with:
           name: lineage-b760h-img
           path: ${{ github.workspace }}/artifacts/lineage-b760h-img.zip
-          retention-days: 7   # keep for a week; adjust if you wish
+          retention-days: 7
