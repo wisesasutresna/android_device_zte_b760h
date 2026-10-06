@@ -109,6 +109,7 @@ jobs:
           # Bump the version by hand to force a cold cache.
           path: /home/runner/.ccache
           key: ccache-ubuntu2204-v1
+          save-always: true
 
       - name: Reset ccache statistics
         run: |
@@ -363,6 +364,15 @@ jobs:
           source build/envsetup.sh
           lunch lineage_b760h-userdebug
           mka bootimage 2>&1 | tee /tmp/bootimage-build.log
+
+      - name: Upload boot image immediately
+        if: (env.BUILD_TARGET == 'all' || env.BUILD_TARGET == 'boot') && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-image-b760h
+          path: /home/runner/android/lineage/out/target/product/b760h/boot.img
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build system image
         if: env.BUILD_TARGET == 'all' || env.BUILD_TARGET == 'system'
