@@ -81,25 +81,22 @@ jobs:
       - name: Apply all patches
         run: |
           cd ~/android/lineage
-          find device/zte/b760h/patches -name "*.patch" -type f -exec sh -c \
-            
-            echo "Applying patch: $1"
-            if ! patch -p1 -t < "$1"; then
-              echo "Patch $1 failed to apply"
+          for patchfile in $(find device/zte/b760h/patches -name "*.patch" -type f | sort); do
+            rel_path="${patchfile#device/zte/b760h/patches/}"
+            if [ -z "$rel_path" ]; then
+              continue
+            fi
+            target_dir="$(dirname "$rel_path")"
+            if [ -n "$target_dir" ]; then
+              cd "$target_dir" || { echo "Failed to change to $target_dir"; exit 1; }
+            fi
+            echo "Applying patch: $patchfile in $(pwd)"
+            if ! patch -p1 -t < "$patchfile"; then
+              echo "Patch $patchfile failed to apply"
               exit 1
             fi
-           _ {} \;
-
-      # -----------------------------------------------------------------
-      # 8. Cache ccache (so subsequent runs only recompile what changed)
-      # -----------------------------------------------------------------
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/ccache
-          key: ccache-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
-          restore-keys: |
-            ccache-${{ runner.os }}-
+            cd ~/android/lineage
+          done
 
       # -----------------------------------------------------------------
       # 9. Prepare the build environment
