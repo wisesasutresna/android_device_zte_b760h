@@ -336,7 +336,7 @@ jobs:
           echo ""
           echo "### ninja targets that mention the module"
           ninja -C out -t targets all 2>/dev/null | grep -i 'org.cyanogenmod.platform-res' | head -12 || true
-          echo "  (kalau kosong, modulenya memang tidak ada di graf ninja)"
+          echo "  (empty means the module genuinely has no ninja target)"
 
           echo ""
           echo "### did the .apk get produced?"
