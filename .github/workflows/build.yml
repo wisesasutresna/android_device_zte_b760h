@@ -348,7 +348,7 @@ jobs:
           echo ""
           echo "### ninja targets that mention the module"
           ninja -C out -t targets all 2>/dev/null | grep -i 'org.cyanogenmod.platform-res' | head -12 || true
-          echo "  (kalau kosong, modulenya memang tidak ada di graf ninja)"
+          echo "  (empty means the module genuinely has no ninja target)"
 
           echo ""
           echo "### did the .apk get produced?"
@@ -432,6 +432,24 @@ jobs:
           lunch lineage_b760h-userdebug
           mka recoveryimage 2>&1 | tee /tmp/recoveryimage-build.log
 
+      - name: Build userdata and cache images
+        # board.mk sizes these to the real partitions (userdata 1 GB, cache
+        # 753 MB) and makes them ext4, but neither is part of droidcore, so
+        # `mka` never produces them. They are the only way to reach a fresh
+        # install by flashing instead of wiping from recovery: boot,
+        # recovery and system all leave /data and /cache untouched, which is
+        # why an unchanged flash still carries the previous ROM's data.
+        #
+        # Opt-in like recovery - both are just empty filesystems and cost real
+        # time for an image nobody wants.
+        if: env.BUILD_TARGET == 'all'
+        run: |
+          set -o pipefail
+          cd "$SYSROOT_DIR"
+          source build/envsetup.sh
+          lunch lineage_b760h-userdebug
+          mka userdataimage cacheimage 2>&1 | tee /tmp/usercache-build.log
+
       - name: Collect Jack diagnostics
         if: always()
         run: |
@@ -499,37 +517,55 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Collect and zip images
-        if: success()
-        run: |
-          set -e
-          OUT="$SYSROOT_DIR/out/target/product/b760h"
-          ART="${{ github.workspace }}/artifacts"
-          mkdir -p "$ART"
-          # Collect whatever this run actually asked for rather than assuming
-          # all three images exist - `workflow_dispatch` can build just one.
-          FOUND=""
-          for img in boot system recovery; do
-            if [ -f "$OUT/$img.img" ]; then
-              cp "$OUT/$img.img" "$ART/"
-              FOUND="$FOUND $img.img"
-              echo "  collected $img.img ($(du -h "$OUT/$img.img" | cut -f1))"
-            else
-              echo "  not built: $img.img"
-            fi
-          done
-          if [ -z "$FOUND" ]; then
-            echo "::error::no images were produced"
-            exit 1
-          fi
-          cd "$ART"
-          # shellcheck disable=SC2086
-          zip -r9 lineage-b760h-img.zip $FOUND
-
-      - name: Upload artefacts
-        if: success()
+      - name: Upload system image immediately
+        if: (env.BUILD_TARGET == 'all' || env.BUILD_TARGET == 'system') && always()
         uses: actions/upload-artifact@v4
         with:
-          name: lineage-b760h-img
-          path: ${{ github.workspace }}/artifacts/lineage-b760h-img.zip
+          name: system-image-b760h
+          path: /home/runner/android/lineage/out/target/product/b760h/system.img
+          if-no-files-found: ignore
           retention-days: 7
+
+      - name: Upload recovery image immediately
+        if: (env.BUILD_TARGET == 'all' || env.BUILD_TARGET == 'recovery') && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-image-b760h
+          path: /home/runner/android/lineage/out/target/product/b760h/recovery.img
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload userdata image immediately
+        if: env.BUILD_TARGET == 'all' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: userdata-image-b760h
+          path: /home/runner/android/lineage/out/target/product/b760h/userdata.img
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload cache image immediately
+        if: env.BUILD_TARGET == 'all' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-image-b760h
+          path: /home/runner/android/lineage/out/target/product/b760h/cache.img
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Report produced images
+        if: always()
+        run: |
+          OUT="$SYSROOT_DIR/out/target/product/b760h"
+          echo "### images present in $OUT"
+          for img in boot system recovery userdata cache; do
+            if [ -f "$OUT/$img.img" ]; then
+              echo "  $img.img  $(du -h "$OUT/$img.img" | cut -f1)"
+            else
+              echo "  $img.img  not built by this run"
+            fi
+          done
+          echo ""
+          echo "userdata.img and cache.img are sparse. `dd` cannot write them:"
+          echo "  simg2img userdata.img userdata.raw.img && dd if=userdata.raw.img of=/dev/block/mmcblk0p6"
+          echo "  simg2img cache.img   cache.raw.img   && dd if=cache.raw.img   of=/dev/block/mmcblk0p7"
