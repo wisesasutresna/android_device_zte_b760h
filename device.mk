@@ -118,5 +118,12 @@ PRODUCT_PACKAGES += \
     SetupWraith \
     B760HSetupCustomizer
 
+# Third-party apps. Prebuilts live in apps/<Module>/ next to their Android.mk;
+# neither declares android.intent.category.HOME, so they land in LeanbackLauncher's
+# Apps row instead of competing with it for the home role.
+PRODUCT_PACKAGES += \
+    AptoideTV \
+    SmartTube
+
 # Remove packages
 PRODUCT_PACKAGES += RemovePackages

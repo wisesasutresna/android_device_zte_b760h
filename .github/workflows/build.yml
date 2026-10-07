@@ -183,6 +183,18 @@ jobs:
           cp -a ~/android/lineage/device/zte/b760h/vendor/zte/b760h \
                 ~/android/lineage/vendor/zte/
 
+          # The GApps payloads get the same treatment, for the same reason.
+          # device.mk does:
+          #   $(call inherit-product-if-exists, vendor/gapps/arm_tvstock/arm_tvstock-vendor.mk)
+          # and arm_tvstock-vendor.mk emits PRODUCT_COPY_FILES entries of the
+          # form vendor/gapps/arm_tvstock/proprietary/..., so that path has to
+          # resolve from the tree root. Leaving the nested copy in place is what
+          # lets all-subdir-makefiles in device/zte/b760h/Android.mk find
+          # vendor/gapps/arm_tvstock/Android.mk and build its 26 prebuilts.
+          mkdir -p ~/android/lineage/vendor/gapps
+          cp -a ~/android/lineage/device/zte/b760h/vendor/gapps/arm_tvstock \
+                ~/android/lineage/vendor/gapps/
+
       - name: Apply all patches
         run: |
           cd ~/android/lineage
