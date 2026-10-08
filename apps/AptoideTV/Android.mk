@@ -8,4 +8,8 @@ LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_SUFFIX := $(COMMON_ANDROID_PACKAGE_SUFFIX)
 LOCAL_CERTIFICATE := PRESIGNED
 
+# Same reason as SmartTube: cm-14.1's dex2oat aborts in
+# CheckVTableHasNoDuplicates on these store-downloaded APKs.
+LOCAL_DEX_PREOPT := false
+
 include $(BUILD_PREBUILT)
